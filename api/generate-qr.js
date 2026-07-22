@@ -1,6 +1,6 @@
 import { generateQR } from "modqr";
 import { createCanvas } from "canvas";
-import FormData from "form-data";
+
 
 export const config = {
   runtime: "nodejs"
@@ -64,27 +64,30 @@ export default async function handler(req, res) {
     // Upload to tmpfiles.org
     const form = new FormData();
 
-    form.append("file", buffer, {
-      filename: "qr.png",
-      contentType: "image/png"
-    });
+form.append(
+  "file",
+  new Blob([buffer], { type: "image/png" }),
+  "qr.png"
+);
 
-    form.append("expire", String(expire));
+form.append("expire", String(expire));
 
-    const upload = await fetch(
-      "https://tmpfiles.org/api/v1/upload",
-      {
-        method: "POST",
-        headers: form.getHeaders(),
-        body: form
-      }
-    );
+const response = await fetch(
+  "https://tmpfiles.org/api/v1/upload",
+  {
+    method: "POST",
+    body: form
+  }
+);
 
-    const result = await upload.json();
+const result = await response.json();
 
-    if (result.status !== "success") {
-      throw new Error("Upload failed.");
-    }
+if (!response.ok || result.status !== "success") {
+  console.log(result);
+  throw new Error(
+    result.message || JSON.stringify(result)
+  );
+}
 
     return res.status(200).json({
       success: true,
