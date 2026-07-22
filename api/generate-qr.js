@@ -1,7 +1,6 @@
 import { generateQR } from "modqr";
 import { createCanvas } from "canvas";
 
-
 export const config = {
   runtime: "nodejs"
 };
@@ -63,35 +62,51 @@ export default async function handler(req, res) {
 
     // Upload to tmpfiles.org
     const form = new FormData();
+    form.append(
+      "file",
+      new Blob([buffer], { type: "image/png" }),
+      "qr.png"
+    );
+    form.append("expire", String(expire));
 
-form.append(
-  "file",
-  new Blob([buffer], { type: "image/png" }),
-  "qr.png"
-);
+    const response = await fetch(
+      "https://tmpfiles.org/api/v1/upload",
+      {
+        method: "POST",
+        body: form
+      }
+    );
 
-form.append("expire", String(expire));
+    const result = await response.json();
 
-const response = await fetch(
-  "https://tmpfiles.org/api/v1/upload",
-  {
-    method: "POST",
-    body: form
-  }
-);
+    if (!response.ok || result.status !== "success") {
+      console.log(result);
+      throw new Error(
+        result.message || JSON.stringify(result)
+      );
+    }
 
-const result = await response.json();
+    const viewUrl = result.data.url;
 
-if (!response.ok || result.status !== "success") {
-  console.log(result);
-  throw new Error(
-    result.message || JSON.stringify(result)
-  );
-}
+    // Follow redirect to get the final image URL
+    const redirect = await fetch(viewUrl.replace(
+      "https://tmpfiles.org/",
+      "https://tmpfiles.org/dl/"
+    ), {
+      redirect: "manual"
+    });
+
+    const imageUrl =
+      redirect.headers.get("location") ||
+      viewUrl.replace(
+        "https://tmpfiles.org/",
+        "https://tmpfiles.org/dl/"
+      );
 
     return res.status(200).json({
       success: true,
-      url: result.data.url,
+      viewUrl,
+      imageUrl,
       options: {
         size,
         style,
