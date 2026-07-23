@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     endpoints: {
       health: "/api",
       generateQR: "/api/generate-qr",
-      verify: "/api/verify.js"
+      verify: "/api/verify"
     }
   });
 }
