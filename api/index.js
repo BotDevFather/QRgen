@@ -31,7 +31,8 @@ export default async function handler(req, res) {
     timestamp: new Date().toISOString(),
     endpoints: {
       health: "/api",
-      generateQR: "/api/generate-qr"
+      generateQR: "/api/generate-qr",
+      verify: "/api/verify.js"
     }
   });
 }
