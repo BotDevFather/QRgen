@@ -8,20 +8,25 @@ export const config = {
   maxDuration: 10
 };
 
-// Load logo ONCE at startup (not per request)
+// Load logo ONCE at startup
+const LOGO_PATH = path.join(process.cwd(), 'public/logo.png');
 let cachedLogo = null;
 
 function getLogo() {
   if (!cachedLogo) {
-    const logoPath = path.join(process.cwd(), 'public/logo.png');
-    const logoBuffer = fs.readFileSync(logoPath);
-    cachedLogo = logoBuffer;
+    try {
+      const logoBuffer = fs.readFileSync(LOGO_PATH);
+      cachedLogo = logoBuffer;
+      console.log('✅ Logo loaded successfully from:', LOGO_PATH);
+    } catch (error) {
+      console.error('❌ Failed to load logo:', error.message);
+      cachedLogo = null;
+    }
   }
   return cachedLogo;
 }
 
 export default async function handler(req, res) {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -40,16 +45,17 @@ export default async function handler(req, res) {
   try {
     const {
       text,
-      size = 400, // Reduced from 600 to 400 for faster processing
+      size = 400,
       margin = 9,
       foreground = "#000000",
       background = "#FFFFFF",
-      errorCorrection = "H",
+      errorCorrection = "M",  // Changed from H to M for speed
       style = "rounded",
       finderStyle = "rounded",
       finderColor,
       customFinderStyles,
       expire = 3600
+      // ⚠️ logo parameter is intentionally IGNORED
     } = req.body;
 
     if (!text) {
@@ -60,7 +66,6 @@ export default async function handler(req, res) {
     }
 
     console.time("qr-generation");
-    // Generate QR
     const qr = generateQR(text, {
       renderer: "canvas",
       size,
@@ -75,7 +80,6 @@ export default async function handler(req, res) {
     });
     console.timeEnd("qr-generation");
 
-    // Create canvas
     const canvas = createCanvas(size, size);
     const ctx = canvas.getContext('2d');
 
@@ -83,43 +87,49 @@ export default async function handler(req, res) {
     await qr.drawCanvas(canvas);
     console.timeEnd("qr-draw");
 
-    // Add logo (NOW USING LOCAL FILE - NO NETWORK CALL)
+    // 🎯 ALWAYS add local logo (IGNORES request logo parameter)
     console.time("logo-processing");
     try {
-      const logoSize = Math.floor(size * 0.20); // 20% of QR size
-      const logoPosition = (size - logoSize) / 2;
-
-      // Load logo from buffer (instant, no network)
       const logoBuffer = getLogo();
-      const logoImage = await loadImage(logoBuffer);
       
-      // White background behind logo
-      ctx.save();
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(size/2, size/2, logoSize/2 + 5, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      
-      // Clip and draw logo
-      ctx.beginPath();
-      ctx.arc(size/2, size/2, logoSize/2, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(logoImage, logoPosition, logoPosition, logoSize, logoSize);
-      ctx.restore();
-      
-      // Border
-      ctx.beginPath();
-      ctx.arc(size/2, size/2, logoSize/2, 0, Math.PI * 2);
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      if (logoBuffer) {
+        const logoSize = Math.floor(size * 0.20); // 20% of QR size
+        const logoPosition = (size - logoSize) / 2;
+
+        const logoImage = await loadImage(logoBuffer);
+        
+        // White background behind logo
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(size/2, size/2, logoSize/2 + 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        
+        // Clip and draw logo
+        ctx.beginPath();
+        ctx.arc(size/2, size/2, logoSize/2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(logoImage, logoPosition, logoPosition, logoSize, logoSize);
+        ctx.restore();
+        
+        // Border
+        ctx.beginPath();
+        ctx.arc(size/2, size/2, logoSize/2, 0, Math.PI * 2);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        console.log('✅ Logo added successfully');
+      } else {
+        console.log('⚠️ No logo available, continuing without it');
+      }
       
       console.timeEnd("logo-processing");
     } catch (logoError) {
-      console.error('Logo error:', logoError);
+      console.error('❌ Logo processing error:', logoError.message);
       // Continue without logo
     }
 
@@ -127,10 +137,11 @@ export default async function handler(req, res) {
     const buffer = canvas.toBuffer("image/png");
     console.timeEnd("buffer-creation");
 
-    // Upload to ImgBB (using binary, not base64)
+    // Upload to ImgBB
     console.time("imgbb-upload");
-    const blob = new Blob([buffer], { type: "image/png" });
     
+    // Use BINARY upload (faster than base64)
+    const blob = new Blob([buffer], { type: "image/png" });
     const formData = new FormData();
     formData.append('key', process.env.IMGBB_API_KEY || '662490f3273c968183d261fbef567d24');
     formData.append('image', blob, 'qr.png');
@@ -139,9 +150,8 @@ export default async function handler(req, res) {
       formData.append('expiration', String(expire));
     }
 
-    // 7-second timeout for ImgBB
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7000);
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
     try {
       const response = await fetch('https://api.imgbb.com/1/upload', {
@@ -175,7 +185,7 @@ export default async function handler(req, res) {
           style,
           finderStyle,
           errorCorrection,
-          hasLogo: true
+          hasLogo: true // Always true because we always add local logo
         },
         imageInfo: {
           id: result.data.id,
@@ -192,13 +202,13 @@ export default async function handler(req, res) {
     } catch (fetchError) {
       clearTimeout(timeout);
       if (fetchError.name === 'AbortError') {
-        throw new Error('ImgBB upload timed out after 7 seconds');
+        throw new Error('ImgBB upload timed out after 8 seconds');
       }
       throw fetchError;
     }
 
   } catch (err) {
-    console.error('Error:', err);
+    console.error('❌ Error:', err);
 
     return res.status(500).json({
       success: false,
