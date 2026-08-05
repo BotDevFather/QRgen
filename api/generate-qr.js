@@ -6,6 +6,26 @@ export const config = {
   maxDuration: 10
 };
 
+// Cache logo globally if it's always the same URL
+let cachedLogo = null;
+let cachedLogoPromise = null;
+
+async function getCachedLogo(logoUrl) {
+  if (cachedLogo) return cachedLogo;
+  if (cachedLogoPromise) return cachedLogoPromise;
+  
+  cachedLogoPromise = loadImage(logoUrl).then(img => {
+    cachedLogo = img;
+    cachedLogoPromise = null;
+    return img;
+  }).catch(err => {
+    cachedLogoPromise = null;
+    throw err;
+  });
+  
+  return cachedLogoPromise;
+}
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -24,9 +44,11 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.time("total-request");
+    
     const {
       text,
-      size = 512,
+      size = 300, // Reduced from 512 to 300 for faster processing
       margin = 4,
       foreground = "#000000",
       background = "#FFFFFF",
@@ -46,6 +68,7 @@ export default async function handler(req, res) {
       });
     }
 
+    console.time("qr-generation");
     // Generate QR without logo first
     const qr = generateQR(text, {
       renderer: "canvas",
@@ -58,56 +81,58 @@ export default async function handler(req, res) {
       finderStyle,
       finderColor,
       customFinderStyles
-      // logo is omitted here - we'll add it manually
     });
+    console.timeEnd("qr-generation");
 
     // Create canvas
     const canvas = createCanvas(size, size);
     const ctx = canvas.getContext('2d');
 
+    console.time("qr-draw");
     // Draw QR code
     await qr.drawCanvas(canvas);
+    console.timeEnd("qr-draw");
 
     // Handle logo if provided
     if (logo && logo.src) {
       try {
-        // Calculate logo size (typically 20-30% of QR code size)
-        const logoSize = Math.floor(size * 0.25); // 25% of QR size
+        console.time("logo-processing");
+        // Calculate logo size (reduced to 20% for better QR readability)
+        const logoSize = Math.floor(size * 0.20);
         const logoPosition = (size - logoSize) / 2;
 
-        // Load the logo image
-        const logoImage = await loadImage(logo.src);
+        // Load the logo image with caching
+        const logoImage = await getCachedLogo(logo.src);
         
-        // Create a circular or square clipping path for the logo
+        // Create a circular clipping path for the logo
         ctx.save();
         
-        // Optional: Add a white background behind logo for better visibility
+        // Draw white background circle/square behind logo
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 10;
-        
-        // Draw white background circle/square behind logo
         ctx.beginPath();
         ctx.arc(size/2, size/2, logoSize/2 + 5, 0, Math.PI * 2);
         ctx.fillStyle = '#FFFFFF';
         ctx.fill();
         ctx.shadowBlur = 0;
         
-        // Clip to circle for rounded logo (optional)
+        // Clip to circle for rounded logo
         ctx.beginPath();
         ctx.arc(size/2, size/2, logoSize/2, 0, Math.PI * 2);
         ctx.clip();
         
         // Draw the logo
         ctx.drawImage(logoImage, logoPosition, logoPosition, logoSize, logoSize);
-        
         ctx.restore();
         
-        // Optional: Add a border around the logo
+        // Add a border around the logo
         ctx.beginPath();
         ctx.arc(size/2, size/2, logoSize/2, 0, Math.PI * 2);
         ctx.strokeStyle = '#FFFFFF';
         ctx.lineWidth = 2;
         ctx.stroke();
+        
+        console.timeEnd("logo-processing");
         
       } catch (logoError) {
         console.error('Logo processing error:', logoError);
@@ -115,65 +140,85 @@ export default async function handler(req, res) {
       }
     }
 
+    console.time("buffer-creation");
     // PNG Buffer
     const buffer = canvas.toBuffer("image/png");
+    console.timeEnd("buffer-creation");
 
-    // Convert buffer to base64
-    const base64Image = buffer.toString('base64');
-
-    // Upload to ImgBB
+    // FIX: Upload binary buffer instead of base64
+    console.time("imgbb-upload");
+    const blob = new Blob([buffer], { type: "image/png" });
+    
     const formData = new FormData();
     formData.append('key', process.env.IMGBB_API_KEY || '662490f3273c968183d261fbef567d24');
-    formData.append('image', base64Image);
-    formData.append('name', 'qr.png');
+    formData.append('image', blob, 'qr.png');
     
-    // Add expiration if provided (in seconds, 60-15552000)
     if (expire && expire >= 60 && expire <= 15552000) {
       formData.append('expiration', String(expire));
     }
 
-    const response = await fetch('https://api.imgbb.com/1/upload', {
-      method: 'POST',
-      body: formData
-    });
+    // Add timeout to ImgBB request
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
 
-    const result = await response.json();
+    try {
+      const response = await fetch('https://api.imgbb.com/1/upload', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal
+      });
 
-    if (!response.ok || !result.success) {
-      console.error('ImgBB Error:', result);
-      throw new Error(
-        result.error?.message || result.statusText || 'Upload failed'
-      );
-    }
+      clearTimeout(timeout);
+      
+      const result = await response.json();
 
-    return res.status(200).json({
-      success: true,
-      imageUrl: result.data.url,
-      displayUrl: result.data.display_url,
-      deleteUrl: result.data.delete_url,
-      thumbUrl: result.data.thumb?.url,
-      mediumUrl: result.data.medium?.url,
-      options: {
-        size,
-        style,
-        finderStyle,
-        errorCorrection,
-        hasLogo: !!logo
-      },
-      imageInfo: {
-        id: result.data.id,
-        title: result.data.title,
-        width: result.data.width,
-        height: result.data.height,
-        size: result.data.size,
-        mime: result.data.image?.mime,
-        extension: result.data.image?.extension,
-        expiration: result.data.expiration
+      if (!response.ok || !result.success) {
+        console.error('ImgBB Error:', result);
+        throw new Error(
+          result.error?.message || result.statusText || 'Upload failed'
+        );
       }
-    });
+
+      console.timeEnd("imgbb-upload");
+      console.timeEnd("total-request");
+
+      return res.status(200).json({
+        success: true,
+        imageUrl: result.data.url,
+        displayUrl: result.data.display_url,
+        deleteUrl: result.data.delete_url,
+        thumbUrl: result.data.thumb?.url,
+        mediumUrl: result.data.medium?.url,
+        options: {
+          size,
+          style,
+          finderStyle,
+          errorCorrection,
+          hasLogo: !!logo
+        },
+        imageInfo: {
+          id: result.data.id,
+          title: result.data.title,
+          width: result.data.width,
+          height: result.data.height,
+          size: result.data.size,
+          mime: result.data.image?.mime,
+          extension: result.data.image?.extension,
+          expiration: result.data.expiration
+        }
+      });
+      
+    } catch (fetchError) {
+      clearTimeout(timeout);
+      if (fetchError.name === 'AbortError') {
+        throw new Error('ImgBB upload timed out after 7 seconds');
+      }
+      throw fetchError;
+    }
 
   } catch (err) {
     console.error('Error:', err);
+    console.timeEnd("total-request");
 
     return res.status(500).json({
       success: false,
