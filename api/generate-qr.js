@@ -2,7 +2,6 @@ import { generateQR } from "modqr";
 import { createCanvas, loadImage } from "canvas";
 import fs from 'fs';
 import path from 'path';
-import FormData from 'form-data';
 
 export const config = {
   runtime: "nodejs",
@@ -25,30 +24,6 @@ function getLogo() {
     }
   }
   return cachedLogo;
-}
-
-// Upload to FreeImage.host
-async function uploadToFreeImage(buffer) {
-  const formData = new FormData();
-  formData.append('source', buffer, {
-    filename: 'qr.png',
-    contentType: 'image/png'
-  });
-
-  const response = await fetch('https://freeimage.host/api/1/upload', {
-    method: 'POST',
-    body: formData,
-    headers: formData.getHeaders()
-  });
-
-  const result = await response.json();
-  
-  if (!result.image?.url) {
-    console.error('FreeImage response:', result);
-    throw new Error('FreeImage upload failed: ' + (result.error?.message || 'Unknown error'));
-  }
-
-  return result.image.url;
 }
 
 export default async function handler(req, res) {
@@ -152,16 +127,13 @@ export default async function handler(req, res) {
 
     console.time("buffer-creation");
     const buffer = canvas.toBuffer("image/png");
+    const base64Image = buffer.toString('base64');
     console.timeEnd("buffer-creation");
 
-    // 🚀 Upload to FreeImage.host
-    console.time("upload-to-freeimage");
-    const imageUrl = await uploadToFreeImage(buffer);
-    console.timeEnd("upload-to-freeimage");
-
+    // 🚀 Return RAW base64 (no upload)
     return res.status(200).json({
       success: true,
-      imageUrl: imageUrl,
+      base64: base64Image,  // Raw base64 string
       options: {
         size,
         style,
