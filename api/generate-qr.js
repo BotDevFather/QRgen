@@ -27,29 +27,28 @@ function getLogo() {
   return cachedLogo;
 }
 
-// Upload to Catbox.moe (Works with Node.js)
-async function uploadToCatbox(buffer) {
+// Upload to FreeImage.host
+async function uploadToFreeImage(buffer) {
   const formData = new FormData();
-  formData.append('fileToUpload', buffer, {
+  formData.append('source', buffer, {
     filename: 'qr.png',
     contentType: 'image/png'
   });
-  formData.append('reqtype', 'fileupload');
 
-  const response = await fetch('https://catbox.moe/user/api.php', {
+  const response = await fetch('https://freeimage.host/api/1/upload', {
     method: 'POST',
     body: formData,
     headers: formData.getHeaders()
   });
 
-  const url = await response.text();
+  const result = await response.json();
   
-  if (!url || !url.startsWith('https://')) {
-    console.error('Catbox response:', url);
-    throw new Error('Catbox upload failed');
+  if (!result.image?.url) {
+    console.error('FreeImage response:', result);
+    throw new Error('FreeImage upload failed: ' + (result.error?.message || 'Unknown error'));
   }
 
-  return url.trim();
+  return result.image.url;
 }
 
 export default async function handler(req, res) {
@@ -155,10 +154,10 @@ export default async function handler(req, res) {
     const buffer = canvas.toBuffer("image/png");
     console.timeEnd("buffer-creation");
 
-    // 🚀 Upload to Catbox.moe
-    console.time("upload-to-catbox");
-    const imageUrl = await uploadToCatbox(buffer);
-    console.timeEnd("upload-to-catbox");
+    // 🚀 Upload to FreeImage.host
+    console.time("upload-to-freeimage");
+    const imageUrl = await uploadToFreeImage(buffer);
+    console.timeEnd("upload-to-freeimage");
 
     return res.status(200).json({
       success: true,
