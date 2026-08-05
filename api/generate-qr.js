@@ -2,6 +2,7 @@ import { generateQR } from "modqr";
 import { createCanvas, loadImage } from "canvas";
 import fs from 'fs';
 import path from 'path';
+import FormData from 'form-data';
 
 export const config = {
   runtime: "nodejs",
@@ -26,24 +27,29 @@ function getLogo() {
   return cachedLogo;
 }
 
-// Upload to Telegra.ph
-async function uploadToTelegraph(buffer) {
+// Upload to Catbox.moe (Works with Node.js)
+async function uploadToCatbox(buffer) {
   const formData = new FormData();
-  const blob = new Blob([buffer], { type: 'image/png' });
-  formData.append('file', blob, 'qr.png');
+  formData.append('fileToUpload', buffer, {
+    filename: 'qr.png',
+    contentType: 'image/png'
+  });
+  formData.append('reqtype', 'fileupload');
 
-  const response = await fetch('https://telegra.ph/upload', {
+  const response = await fetch('https://catbox.moe/user/api.php', {
     method: 'POST',
-    body: formData
+    body: formData,
+    headers: formData.getHeaders()
   });
 
-  const result = await response.json();
+  const url = await response.text();
   
-  if (!result[0]?.src) {
-    throw new Error('Telegraph upload failed');
+  if (!url || !url.startsWith('https://')) {
+    console.error('Catbox response:', url);
+    throw new Error('Catbox upload failed');
   }
 
-  return `https://telegra.ph${result[0].src}`;
+  return url.trim();
 }
 
 export default async function handler(req, res) {
@@ -149,10 +155,10 @@ export default async function handler(req, res) {
     const buffer = canvas.toBuffer("image/png");
     console.timeEnd("buffer-creation");
 
-    // 🚀 Upload to Telegra.ph (super fast!)
-    console.time("upload-to-telegraph");
-    const imageUrl = await uploadToTelegraph(buffer);
-    console.timeEnd("upload-to-telegraph");
+    // 🚀 Upload to Catbox.moe
+    console.time("upload-to-catbox");
+    const imageUrl = await uploadToCatbox(buffer);
+    console.timeEnd("upload-to-catbox");
 
     return res.status(200).json({
       success: true,
