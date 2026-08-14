@@ -22,7 +22,7 @@ export default async function handler(req, res) {
       merchantId = "73261518",
       sDate,
       eDate,
-      pageSize = 10,
+      pageSize = 20,
       pageCount = 0,
       module = "PAYMENT_QR"
     } = params;
