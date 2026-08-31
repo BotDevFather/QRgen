@@ -22,7 +22,7 @@ export default async function handler(req, res) {
       merchantId = "73261518",
       sDate,
       eDate,
-      pageSize = 30,
+      pageSize = 10,
       pageCount = 0,
       module = "PAYMENT_QR"
     } = params;
@@ -45,14 +45,15 @@ export default async function handler(req, res) {
       start.setDate(start.getDate() - 1);
       
       if (!startDate) {
-        startDate = start.toISOString().split('T')[0];
+        // Convert to timestamp (milliseconds)
+        startDate = start.getTime().toString();
       }
       if (!endDate) {
-        endDate = end.toISOString().split('T')[0];
+        endDate = end.getTime().toString();
       }
     }
 
-    // Build the URL
+    // Build the URL with timestamps
     const baseUrl = "https://payments-tesseract.bharatpe.in/api/v1/merchant/transactions";
     const url = new URL(baseUrl);
     url.searchParams.append('module', module);
@@ -74,11 +75,11 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // Return the response
-    return res.status(response.status).json({
-      success: response.ok,
-      status: response.status,
-      data: data
+    // Return the response in the same format
+    return res.status(200).json({
+      message: data.message || "SUCCESS",
+      status: data.status || true,
+      data: data.data || data
     });
 
   } catch (err) {
