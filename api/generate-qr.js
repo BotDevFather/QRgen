@@ -26,10 +26,7 @@ function getLogo() {
       cachedLogo = fs.readFileSync(LOGO_PATH);
       console.log("Logo loaded successfully");
     } catch (error) {
-      console.error(
-        "Failed to load logo:",
-        error.message
-      );
+      console.error("Failed to load logo:", error.message);
       cachedLogo = null;
     }
   }
@@ -65,7 +62,6 @@ function generateOrderId() {
       if (part.type !== "literal") {
         result[part.type] = part.value;
       }
-
       return result;
     }, {});
 
@@ -77,18 +73,14 @@ function generateOrderId() {
     parts.minute +
     parts.second;
 
-  const random = Math.floor(
-    1000 + Math.random() * 9000
-  );
+  const random = Math.floor(1000 + Math.random() * 9000);
 
   return timestamp + random;
 }
 
 function getParams(req) {
   if (req.method === "GET") {
-    return {
-      ...req.query,
-    };
+    return { ...req.query };
   }
 
   return req.body || {};
@@ -102,45 +94,35 @@ async function uploadQrToTempFile(buffer, orderId) {
 
   form.append(
     "files",
-    new Blob([buffer], {
-      type: "image/png",
-    }),
+    new Blob([buffer], { type: "image/png" }),
     `qr-${safeOrderId}.png`
   );
 
   form.append("expiryHours", "1");
 
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    20000
-  );
+  const timeout = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const response = await fetch(
-      TEMPFILE_UPLOAD_URL,
-      {
-        method: "POST",
-        body: form,
-        signal: controller.signal,
-      }
-    );
+    const response = await fetch(TEMPFILE_UPLOAD_URL, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
 
     const result = await response.json();
 
     if (!response.ok || result.success !== true) {
       throw new Error(
         result.message ||
-        `Temporary upload failed with HTTP ${response.status}`
+          `TempFile returned HTTP ${response.status}`
       );
     }
 
     const file = result.files?.[0];
 
     if (!file?.id) {
-      throw new Error(
-        "Temporary host did not return a file ID."
-      );
+      throw new Error("TempFile did not return a file ID.");
     }
 
     return {
@@ -150,7 +132,6 @@ async function uploadQrToTempFile(buffer, orderId) {
       previewUrl: `https://tempfile.org/${file.id}/preview`,
       downloadUrl: `https://tempfile.org/${file.id}/download`,
       expiryTime: file.expiryTime || null,
-      fileName: file.name || `qr-${safeOrderId}.png`,
       sizeBytes: buffer.length,
       sizeKB: Number((buffer.length / 1024).toFixed(2)),
     };
@@ -160,16 +141,8 @@ async function uploadQrToTempFile(buffer, orderId) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "*"
-  );
-
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, OPTIONS"
-  );
-
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization"
@@ -179,121 +152,68 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  if (
-    req.method !== "GET" &&
-    req.method !== "POST"
-  ) {
+  if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({
       success: false,
-      message:
-        "Only GET and POST requests are allowed.",
+      message: "Only GET and POST requests are allowed.",
     });
   }
 
   try {
     const params = getParams(req);
 
-    const upi = String(
-      params.upi ||
-      params.vpa ||
-      ""
-    ).trim();
-
-    const amount = String(
-      params.amount ||
-      ""
-    ).trim();
-
-    const name = String(
-      params.name ||
-      "KeysPanel"
-    ).trim();
+    const upi = String(params.upi || params.vpa || "").trim();
+    const amount = String(params.amount || "").trim();
+    const name = String(params.name || "KeysPanel").trim();
 
     const size = Math.max(
       200,
-      Math.min(
-        1000,
-        Number(params.size) || 400
-      )
+      Math.min(1000, Number(params.size) || 400)
     );
 
-    const margin = Math.max(
-      0,
-      Number(params.margin) || 9
-    );
+    const margin = Math.max(0, Number(params.margin) || 9);
+    const foreground = String(params.foreground || "#000000");
+    const background = String(params.background || "#FFFFFF");
+    const errorCorrection = String(params.errorCorrection || "H");
+    const style = String(params.style || "rounded");
+    const finderStyle = String(params.finderStyle || "rounded");
 
-    const foreground = String(
-      params.foreground ||
-      "#000000"
-    );
-
-    const background = String(
-      params.background ||
-      "#FFFFFF"
-    );
-
-    const errorCorrection = String(
-      params.errorCorrection ||
-      "H"
-    );
-
-    const style = String(
-      params.style ||
-      "rounded"
-    );
-
-    const finderStyle = String(
-      params.finderStyle ||
-      "rounded"
-    );
-
-    const finderColor =
-      params.finderColor
-        ? String(params.finderColor)
-        : undefined;
+    const finderColor = params.finderColor
+      ? String(params.finderColor)
+      : undefined;
 
     if (!upi) {
       return res.status(400).json({
         success: false,
-        message:
-          "Parameter 'upi' is required.",
+        message: "Parameter 'upi' is required.",
       });
     }
 
     if (!amount) {
       return res.status(400).json({
         success: false,
-        message:
-          "Parameter 'amount' is required.",
+        message: "Parameter 'amount' is required.",
       });
     }
 
     const numericAmount = Number(amount);
 
-    if (
-      !Number.isFinite(numericAmount) ||
-      numericAmount <= 0
-    ) {
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       return res.status(400).json({
         success: false,
-        message:
-          "Parameter 'amount' must be a valid positive number.",
+        message: "Parameter 'amount' must be a valid positive number.",
       });
     }
 
     const orderId = String(
-      params.orderId ||
-      params.orderid ||
-      generateOrderId()
+      params.orderId || params.orderid || generateOrderId()
     ).trim();
 
     const upiLink =
       "upi://pay" +
       `?pa=${phpUrlEncode(upi)}` +
       `&pn=${phpUrlEncode(name)}` +
-      `&am=${phpUrlEncode(
-        numericAmount.toFixed(2)
-      )}` +
+      `&am=${phpUrlEncode(numericAmount.toFixed(2))}` +
       "&cu=INR" +
       `&tr=${phpUrlEncode(orderId)}` +
       `&tn=${phpUrlEncode(orderId)}`;
@@ -307,9 +227,7 @@ export default async function handler(req, res) {
       errorCorrection,
       style,
       finderStyle,
-      ...(finderColor
-        ? { finderColor }
-        : {}),
+      ...(finderColor ? { finderColor } : {}),
     });
 
     const canvas = createCanvas(size, size);
@@ -322,40 +240,24 @@ export default async function handler(req, res) {
     if (logoBuffer) {
       try {
         const logoImage = await loadImage(logoBuffer);
-
-        const logoSize = Math.floor(size * 0.20);
+        const logoSize = Math.floor(size * 0.2);
         const center = size / 2;
         const logoRadius = logoSize / 2;
         const logoPosition = center - logoRadius;
 
         ctx.save();
-
         ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
         ctx.shadowBlur = 10;
 
         ctx.beginPath();
-        ctx.arc(
-          center,
-          center,
-          logoRadius + 6,
-          0,
-          Math.PI * 2
-        );
-
+        ctx.arc(center, center, logoRadius + 6, 0, Math.PI * 2);
         ctx.fillStyle = "#FFFFFF";
         ctx.fill();
 
         ctx.shadowBlur = 0;
 
         ctx.beginPath();
-        ctx.arc(
-          center,
-          center,
-          logoRadius,
-          0,
-          Math.PI * 2
-        );
-
+        ctx.arc(center, center, logoRadius, 0, Math.PI * 2);
         ctx.clip();
 
         ctx.drawImage(
@@ -369,22 +271,12 @@ export default async function handler(req, res) {
         ctx.restore();
 
         ctx.beginPath();
-        ctx.arc(
-          center,
-          center,
-          logoRadius,
-          0,
-          Math.PI * 2
-        );
-
+        ctx.arc(center, center, logoRadius, 0, Math.PI * 2);
         ctx.strokeStyle = "#FFFFFF";
         ctx.lineWidth = 2;
         ctx.stroke();
       } catch (logoError) {
-        console.error(
-          "Logo processing error:",
-          logoError.message
-        );
+        console.error("Logo processing error:", logoError.message);
       }
     }
 
@@ -394,24 +286,17 @@ export default async function handler(req, res) {
     });
 
     const fileSize = buffer.length;
-    const fileSizeKB = Number(
-      (fileSize / 1024).toFixed(2)
-    );
+    const fileSizeKB = Number((fileSize / 1024).toFixed(2));
 
     console.log(
       `QR image size: ${fileSize} bytes (${fileSizeKB} KB)`
     );
 
-    const format = String(
-      params.format || ""
-    ).toLowerCase();
+    const format = String(params.format || "").toLowerCase();
 
     if (format === "hosted") {
       try {
-        const hosted = await uploadQrToTempFile(
-          buffer,
-          orderId
-        );
+        const hosted = await uploadQrToTempFile(buffer, orderId);
 
         return res.status(200).json({
           ...hosted,
@@ -460,39 +345,23 @@ export default async function handler(req, res) {
           style,
           finderStyle,
           hasLogo: Boolean(logoBuffer),
-          logoSize: 0.20,
+          logoSize: 0.2,
           compressionLevel: 9,
         },
       });
     }
 
-    res.setHeader(
-      "Content-Type",
-      "image/png"
-    );
-
-    res.setHeader(
-      "Content-Length",
-      String(buffer.length)
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Content-Length", String(buffer.length));
+    res.setHeader("Cache-Control", "no-store");
 
     return res.status(200).send(buffer);
   } catch (error) {
-    console.error(
-      "QR generation error:",
-      error
-    );
+    console.error("QR generation error:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error?.message ||
-        "Internal Server Error",
+      message: error?.message || "Internal Server Error",
     });
   }
 }
