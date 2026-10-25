@@ -6,7 +6,7 @@ import path from "path";
 
 export const config = {
   runtime: "nodejs",
-  maxDuration: 10,
+  maxDuration: 30,
 };
 
 const LOGO_PATH = path.join(
@@ -14,6 +14,9 @@ const LOGO_PATH = path.join(
   "public",
   "logo.png"
 );
+
+const TEMPFILE_UPLOAD_URL =
+  "https://tempfile.org/api/upload/local";
 
 let cachedLogo = null;
 
@@ -89,6 +92,71 @@ function getParams(req) {
   }
 
   return req.body || {};
+}
+
+async function uploadQrToTempFile(buffer, orderId) {
+  const form = new FormData();
+
+  const safeOrderId = String(orderId || "payment")
+    .replace(/[^a-zA-Z0-9_-]/g, "_");
+
+  form.append(
+    "files",
+    new Blob([buffer], {
+      type: "image/png",
+    }),
+    `qr-${safeOrderId}.png`
+  );
+
+  form.append("expiryHours", "1");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    20000
+  );
+
+  try {
+    const response = await fetch(
+      TEMPFILE_UPLOAD_URL,
+      {
+        method: "POST",
+        body: form,
+        signal: controller.signal,
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok || result.success !== true) {
+      throw new Error(
+        result.message ||
+        `Temporary upload failed with HTTP ${response.status}`
+      );
+    }
+
+    const file = result.files?.[0];
+
+    if (!file?.id) {
+      throw new Error(
+        "Temporary host did not return a file ID."
+      );
+    }
+
+    return {
+      success: true,
+      fileId: file.id,
+      url: file.url || `https://tempfile.org/${file.id}/`,
+      previewUrl: `https://tempfile.org/${file.id}/preview`,
+      downloadUrl: `https://tempfile.org/${file.id}/download`,
+      expiryTime: file.expiryTime || null,
+      fileName: file.name || `qr-${safeOrderId}.png`,
+      sizeBytes: buffer.length,
+      sizeKB: Number((buffer.length / 1024).toFixed(2)),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export default async function handler(req, res) {
@@ -320,23 +388,54 @@ export default async function handler(req, res) {
       }
     }
 
-    // Compress PNG without reducing image dimensions.
     const buffer = canvas.toBuffer("image/png", {
       compressionLevel: 9,
       filters: canvas.PNG_FILTER_NONE,
     });
 
     const fileSize = buffer.length;
-    const fileSizeKB = (fileSize / 1024).toFixed(2);
+    const fileSizeKB = Number(
+      (fileSize / 1024).toFixed(2)
+    );
 
     console.log(
       `QR image size: ${fileSize} bytes (${fileSizeKB} KB)`
     );
 
-    const wantsJson =
-      String(params.format || "").toLowerCase() === "json";
+    const format = String(
+      params.format || ""
+    ).toLowerCase();
 
-    if (wantsJson) {
+    if (format === "hosted") {
+      try {
+        const hosted = await uploadQrToTempFile(
+          buffer,
+          orderId
+        );
+
+        return res.status(200).json({
+          ...hosted,
+          orderId,
+          amount: numericAmount.toFixed(2),
+          mimeType: "image/png",
+          upiLink,
+        });
+      } catch (uploadError) {
+        console.error(
+          "QR temporary hosting error:",
+          uploadError.message
+        );
+
+        return res.status(502).json({
+          success: false,
+          error: "QR_TEMP_HOSTING_FAILED",
+          message:
+            "QR was generated, but temporary image hosting failed.",
+        });
+      }
+    }
+
+    if (format === "json") {
       const base64 = buffer.toString("base64");
 
       return res.status(200).json({
@@ -349,7 +448,7 @@ export default async function handler(req, res) {
         format: "png",
         mimeType: "image/png",
         fileSizeBytes: fileSize,
-        fileSizeKB: Number(fileSizeKB),
+        fileSizeKB,
         base64,
         dataUrl: `data:image/png;base64,${base64}`,
         options: {
