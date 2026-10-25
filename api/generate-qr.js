@@ -1,3 +1,4 @@
+
 import { generateQR } from "modqr";
 import { createCanvas, loadImage } from "canvas";
 import fs from "fs";
@@ -199,8 +200,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const numericAmount =
-      Number(amount);
+    const numericAmount = Number(amount);
 
     if (
       !Number.isFinite(numericAmount) ||
@@ -213,12 +213,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const orderId =
-      String(
-        params.orderId ||
-        params.orderid ||
-        generateOrderId()
-      ).trim();
+    const orderId = String(
+      params.orderId ||
+      params.orderid ||
+      generateOrderId()
+    ).trim();
 
     const upiLink =
       "upi://pay" +
@@ -231,74 +230,42 @@ export default async function handler(req, res) {
       `&tr=${phpUrlEncode(orderId)}` +
       `&tn=${phpUrlEncode(orderId)}`;
 
-    const qr = generateQR(
-      upiLink,
-      {
-        renderer: "canvas",
+    const qr = generateQR(upiLink, {
+      renderer: "canvas",
+      size,
+      margin,
+      foreground,
+      background,
+      errorCorrection,
+      style,
+      finderStyle,
+      ...(finderColor
+        ? { finderColor }
+        : {}),
+    });
 
-        size,
-
-        margin,
-
-        foreground,
-
-        background,
-
-        errorCorrection,
-
-        style,
-
-        finderStyle,
-
-        ...(finderColor
-          ? {
-              finderColor,
-            }
-          : {}),
-      }
-    );
-
-    const canvas =
-      createCanvas(size, size);
-
-    const ctx =
-      canvas.getContext("2d");
+    const canvas = createCanvas(size, size);
+    const ctx = canvas.getContext("2d");
 
     await qr.drawCanvas(canvas);
 
-    const logoBuffer =
-      getLogo();
+    const logoBuffer = getLogo();
 
     if (logoBuffer) {
       try {
-        const logoImage =
-          await loadImage(
-            logoBuffer
-          );
+        const logoImage = await loadImage(logoBuffer);
 
-        const logoSize =
-          Math.floor(
-            size * 0.20
-          );
-
-        const center =
-          size / 2;
-
-        const logoRadius =
-          logoSize / 2;
-
-        const logoPosition =
-          center - logoRadius;
+        const logoSize = Math.floor(size * 0.20);
+        const center = size / 2;
+        const logoRadius = logoSize / 2;
+        const logoPosition = center - logoRadius;
 
         ctx.save();
 
-        ctx.shadowColor =
-          "rgba(0, 0, 0, 0.3)";
-
+        ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
         ctx.shadowBlur = 10;
 
         ctx.beginPath();
-
         ctx.arc(
           center,
           center,
@@ -307,15 +274,12 @@ export default async function handler(req, res) {
           Math.PI * 2
         );
 
-        ctx.fillStyle =
-          "#FFFFFF";
-
+        ctx.fillStyle = "#FFFFFF";
         ctx.fill();
 
         ctx.shadowBlur = 0;
 
         ctx.beginPath();
-
         ctx.arc(
           center,
           center,
@@ -337,7 +301,6 @@ export default async function handler(req, res) {
         ctx.restore();
 
         ctx.beginPath();
-
         ctx.arc(
           center,
           center,
@@ -346,11 +309,8 @@ export default async function handler(req, res) {
           Math.PI * 2
         );
 
-        ctx.strokeStyle =
-          "#FFFFFF";
-
+        ctx.strokeStyle = "#FFFFFF";
         ctx.lineWidth = 2;
-
         ctx.stroke();
       } catch (logoError) {
         console.error(
@@ -360,32 +320,38 @@ export default async function handler(req, res) {
       }
     }
 
-    const buffer =
-      canvas.toBuffer("image/png");
+    // Compress PNG without reducing image dimensions.
+    const buffer = canvas.toBuffer("image/png", {
+      compressionLevel: 9,
+      filters: canvas.PNG_FILTER_NONE,
+    });
+
+    const fileSize = buffer.length;
+    const fileSizeKB = (fileSize / 1024).toFixed(2);
+
+    console.log(
+      `QR image size: ${fileSize} bytes (${fileSizeKB} KB)`
+    );
 
     const wantsJson =
-      String(
-        params.format || ""
-      ).toLowerCase() ===
-      "json";
+      String(params.format || "").toLowerCase() === "json";
 
     if (wantsJson) {
+      const base64 = buffer.toString("base64");
+
       return res.status(200).json({
         success: true,
         orderId,
-        amount:
-          numericAmount.toFixed(2),
+        amount: numericAmount.toFixed(2),
         name,
         upi,
         upiLink,
         format: "png",
         mimeType: "image/png",
-        base64:
-          buffer.toString("base64"),
-        dataUrl:
-          `data:image/png;base64,${buffer.toString(
-            "base64"
-          )}`,
+        fileSizeBytes: fileSize,
+        fileSizeKB: Number(fileSizeKB),
+        base64,
+        dataUrl: `data:image/png;base64,${base64}`,
         options: {
           size,
           margin,
@@ -394,10 +360,9 @@ export default async function handler(req, res) {
           errorCorrection,
           style,
           finderStyle,
-          hasLogo: Boolean(
-            logoBuffer
-          ),
+          hasLogo: Boolean(logoBuffer),
           logoSize: 0.20,
+          compressionLevel: 9,
         },
       });
     }
@@ -409,7 +374,7 @@ export default async function handler(req, res) {
 
     res.setHeader(
       "Content-Length",
-      buffer.length
+      String(buffer.length)
     );
 
     res.setHeader(
@@ -417,9 +382,7 @@ export default async function handler(req, res) {
       "no-store"
     );
 
-    return res.status(200).send(
-      buffer
-    );
+    return res.status(200).send(buffer);
   } catch (error) {
     console.error(
       "QR generation error:",
